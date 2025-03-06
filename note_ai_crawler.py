@@ -15,7 +15,63 @@ from tqdm import tqdm
 
 
 class NoteAICrawler:
-    def __init__(self, search_keyword="AI", max_pages=5, output_dir="output"):
+    # 各要素の取得に使用するセレクタを定数として定義
+    TITLE_SELECTORS = [
+        "h1.o-noteContentHeader__title",  # パターン1: o-noteContentHeader__title クラスのh1タグ
+        "meta[property='og:title']",  # パターン2: メタタグ
+        "title",  # パターン3: titleタグ
+        "h1",  # パターン4: 任意のh1タグ
+    ]
+
+    AUTHOR_SELECTORS = [
+        "a[data-note-user-name]",  # パターン1: data-note-user-name属性
+        "meta[property='og:site_name']",  # パターン3: メタタグから著者名を抽出
+    ]
+
+    LIKES_SELECTORS = [
+        "button[data-like-count]",  # パターン1: data-like-count属性
+        ".o-noteContentHeader__titleAttachment",  # パターン2: o-noteContentHeader__titleAttachment クラスの要素
+        "span[class*='like'], div[class*='like'], span[class*='heart'], div[class*='heart']",  # パターン3: likeやheartを含むクラス名の要素
+    ]
+
+    TAGS_SELECTORS = [
+        "a[href^='/hashtag/']",  # パターン1: /hashtag/へのリンク
+        "a[class*='tag'], span[class*='tag']",  # パターン2: tagを含むクラス名の要素
+    ]
+
+    CONTENT_SELECTORS = [
+        "div.note-common-styles__textnote-body p, div[class*='styles__text'] p, article p"  # 複数のパターンを試す
+    ]
+
+    # AI関連キーワード
+    AI_KEYWORDS = [
+        "AI",
+        "人工知能",
+        "機械学習",
+        "ディープラーニング",
+        "ChatGPT",
+        "GPT",
+        "生成AI",
+        "強化学習",
+        "自然言語処理",
+        "NLP",
+        "OpenAI",
+        "Claude",
+        "Gemini",
+        "LLM",
+        "大規模言語モデル",
+    ]
+
+    def __init__(
+        self,
+        search_keyword="AI",
+        max_pages=5,
+        output_dir="output",
+        min_wait=1.0,
+        max_wait=3.0,
+        detail_min_wait=2.0,
+        detail_max_wait=4.0,
+    ):
         """
         noteからAI関連の記事をクロールするクラス
 
@@ -23,12 +79,20 @@ class NoteAICrawler:
             search_keyword (str): 検索キーワード
             max_pages (int): クロールする最大ページ数
             output_dir (str): 出力ディレクトリ
+            min_wait (float): 検索時の最小待機時間（秒）
+            max_wait (float): 検索時の最大待機時間（秒）
+            detail_min_wait (float): 詳細取得時の最小待機時間（秒）
+            detail_max_wait (float): 詳細取得時の最大待機時間（秒）
         """
         self.base_url = "https://note.com"
         self.search_url = f"{self.base_url}/search"
         self.search_keyword = search_keyword
         self.max_pages = max_pages
         self.output_dir = output_dir
+        self.min_wait = min_wait
+        self.max_wait = max_wait
+        self.detail_min_wait = detail_min_wait
+        self.detail_max_wait = detail_max_wait
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
@@ -85,7 +149,7 @@ class NoteAICrawler:
                             self.articles.append({"url": article_url, "title_from_search": title})
 
                 # サーバーに負荷をかけないよう少し待機
-                time.sleep(random.uniform(1.0, 3.0))
+                time.sleep(random.uniform(self.min_wait, self.max_wait))
 
             except Exception as e:
                 print(f"ページ {page} の取得中にエラーが発生しました: {e}")
@@ -139,7 +203,7 @@ class NoteAICrawler:
                 )
 
                 # サーバーに負荷をかけないよう少し待機
-                time.sleep(random.uniform(2.0, 4.0))
+                time.sleep(random.uniform(self.detail_min_wait, self.detail_max_wait))
 
             except Exception as e:
                 print(f"記事 {article['url']} の詳細取得中にエラーが発生しました: {e}")
@@ -158,83 +222,82 @@ class NoteAICrawler:
         """記事のタイトルを取得する"""
         title = article.get("title_from_search", "")
 
-        # 複数のパターンを試す
+        # パターン1: o-noteContentHeader__title クラスのh1タグ
         try:
-            # パターン1: o-noteContentHeader__title クラスのh1タグ
-            title_elem = soup.select_one("h1.o-noteContentHeader__title")
+            title_elem = soup.select_one(self.TITLE_SELECTORS[0])
             if title_elem and title_elem.text.strip():
                 return title_elem.text.strip()
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"タイトル取得パターン1でエラー: {e}")
 
+        # パターン2: メタタグ
         try:
-            # パターン2: メタタグ
             meta_title = soup.find("meta", property="og:title")
             if meta_title:
                 title_text = meta_title.get("content", "")
                 # "｜note"や"｜著者名"などの部分を削除
                 return re.sub(r"[\s\|｜].*$", "", title_text)
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"タイトル取得パターン2でエラー: {e}")
 
+        # パターン3: titleタグ
         try:
-            # パターン3: titleタグ
             title_elem = soup.title
             if title_elem:
                 title_text = title_elem.text.strip()
                 # "｜note"や"｜著者名"などの部分を削除
                 return re.sub(r"[\s\|｜].*$", "", title_text)
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"タイトル取得パターン3でエラー: {e}")
 
+        # パターン4: 任意のh1タグ
         try:
-            # パターン4: 任意のh1タグ
             h1_elems = soup.find_all("h1")
             for h1 in h1_elems:
                 if h1 and hasattr(h1, "text") and h1.text.strip():
                     return h1.text.strip()
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"タイトル取得パターン4でエラー: {e}")
 
+        # パターン5: URLからスラッグを抽出して、タイトルとして使用
         try:
-            # パターン5: URLからスラッグを抽出して、タイトルとして使用
             url_parts = article["url"].split("/")
             if len(url_parts) > 0:
                 slug = url_parts[-1]
                 # スラッグをタイトルらしい形式に変換（ハイフンをスペースに置換など）
                 return slug.replace("-", " ").replace("_", " ").replace("n", "")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"タイトル取得パターン5でエラー: {e}")
 
         return title or "タイトル不明"
 
     def _get_author(self, soup, article):
         """記事の著者を取得する"""
+        # パターン1: data-note-user-name属性
         try:
-            # パターン1: data-note-user-name属性
-            author_elem = soup.select_one("a[data-note-user-name]")
+            author_elem = soup.select_one(self.AUTHOR_SELECTORS[0])
             if author_elem:
                 return author_elem.get("data-note-user-name")
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"著者取得パターン1でエラー: {e}")
 
+        # パターン2: URLから著者名を抽出
         try:
-            # パターン2: URLから著者名を抽出
             author_match = re.search(r"note\.com/([^/]+)", article["url"])
             if author_match:
                 return author_match.group(1)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"著者取得パターン2でエラー: {e}")
 
+        # パターン3: メタタグから著者名を抽出
         try:
-            # パターン3: メタタグから著者名を抽出
             meta_author = soup.find("meta", property="og:site_name")
             if meta_author:
                 author_text = meta_author.get("content", "")
                 if author_text and author_text != "note":
                     return author_text
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"著者取得パターン3でエラー: {e}")
 
         return "著者不明"
 
@@ -244,43 +307,41 @@ class NoteAICrawler:
             date_elem = soup.select_one("time")
             if date_elem:
                 return date_elem.get("datetime")
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"投稿日取得でエラー: {e}")
         return None
 
     def _get_likes(self, soup):
         """記事のいいね数を取得する"""
+        # パターン1: data-like-count属性
         try:
-            # パターン1: data-like-count属性
-            like_elem = soup.select_one("button[data-like-count]")
+            like_elem = soup.select_one(self.LIKES_SELECTORS[0])
             if like_elem:
                 return like_elem.get("data-like-count")
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"いいね数取得パターン1でエラー: {e}")
 
+        # パターン2: o-noteContentHeader__titleAttachment クラスの要素
         try:
-            # パターン2: o-noteContentHeader__titleAttachment クラスの要素
-            like_elem = soup.select_one(".o-noteContentHeader__titleAttachment")
+            like_elem = soup.select_one(self.LIKES_SELECTORS[1])
             if like_elem:
                 like_text = like_elem.text.strip()
                 like_match = re.search(r"\d+", like_text)
                 if like_match:
                     return like_match.group(0)
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"いいね数取得パターン2でエラー: {e}")
 
+        # パターン3: likeやheartを含むクラス名の要素
         try:
-            # パターン3: likeやheartを含むクラス名の要素
-            like_text_elem = soup.select_one(
-                "span[class*='like'], div[class*='like'], span[class*='heart'], div[class*='heart']"
-            )
+            like_text_elem = soup.select_one(self.LIKES_SELECTORS[2])
             if like_text_elem:
                 like_text = like_text_elem.text.strip()
                 like_match = re.search(r"\d+", like_text)
                 if like_match:
                     return like_match.group(0)
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"いいね数取得パターン3でエラー: {e}")
 
         return "0"
 
@@ -288,21 +349,21 @@ class NoteAICrawler:
         """記事のタグを取得する"""
         tags = []
 
+        # パターン1: /hashtag/へのリンク
         try:
-            # パターン1: /hashtag/へのリンク
-            tags_elems = soup.select("a[href^='/hashtag/']")
+            tags_elems = soup.select(self.TAGS_SELECTORS[0])
             if tags_elems:
                 return [tag.text.strip() for tag in tags_elems if tag.text.strip()]
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"タグ取得パターン1でエラー: {e}")
 
+        # パターン2: tagを含むクラス名の要素
         try:
-            # パターン2: tagを含むクラス名の要素
-            tags_elems = soup.select("a[class*='tag'], span[class*='tag']")
+            tags_elems = soup.select(self.TAGS_SELECTORS[1])
             if tags_elems:
                 return [tag.text.strip() for tag in tags_elems if tag.text.strip()]
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"タグ取得パターン2でエラー: {e}")
 
         return tags
 
@@ -310,36 +371,16 @@ class NoteAICrawler:
         """記事の本文プレビューを取得する"""
         try:
             # 複数のパターンを試す
-            content_elems = soup.select(
-                "div.note-common-styles__textnote-body p, div[class*='styles__text'] p, article p"
-            )
+            content_elems = soup.select(self.CONTENT_SELECTORS[0])
             if content_elems:
                 return "\n".join([p.text.strip() for p in content_elems[:3] if p.text.strip()])
-        except (AttributeError, TypeError):
-            pass
+        except (AttributeError, TypeError) as e:
+            print(f"本文プレビュー取得でエラー: {e}")
 
         return ""
 
     def filter_ai_articles(self):
         """AI関連の記事のみをフィルタリング"""
-        ai_keywords = [
-            "AI",
-            "人工知能",
-            "機械学習",
-            "ディープラーニング",
-            "ChatGPT",
-            "GPT",
-            "生成AI",
-            "強化学習",
-            "自然言語処理",
-            "NLP",
-            "OpenAI",
-            "Claude",
-            "Gemini",
-            "LLM",
-            "大規模言語モデル",
-        ]
-
         filtered_articles = []
 
         for article in self.articles:
@@ -349,7 +390,7 @@ class NoteAICrawler:
             content = article.get("content_preview", "").lower()
 
             is_ai_related = False
-            for keyword in ai_keywords:
+            for keyword in self.AI_KEYWORDS:
                 keyword_lower = keyword.lower()
                 if keyword_lower in title or any(keyword_lower in tag for tag in tags) or keyword_lower in content:
                     is_ai_related = True
@@ -402,6 +443,14 @@ if __name__ == "__main__":
     output_dir = "output"  # 出力ディレクトリ
 
     # クローラーの実行
-    crawler = NoteAICrawler(search_keyword=search_keyword, max_pages=max_pages, output_dir=output_dir)
+    crawler = NoteAICrawler(
+        search_keyword=search_keyword,
+        max_pages=max_pages,
+        output_dir=output_dir,
+        min_wait=1.0,
+        max_wait=3.0,
+        detail_min_wait=2.0,
+        detail_max_wait=4.0,
+    )
 
     crawler.run()
