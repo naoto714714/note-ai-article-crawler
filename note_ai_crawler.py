@@ -118,115 +118,13 @@ class NoteAICrawler:
 
                 soup = BeautifulSoup(response.text, "lxml")
 
-                # タイトル (複数のパターンを試す)
-                title = article.get("title_from_search", "")
-
-                # パターン1: o-noteContentHeader__title クラスのh1タグ
-                title_elem = soup.select_one("h1.o-noteContentHeader__title")
-                if title_elem and title_elem.text.strip():
-                    title = title_elem.text.strip()
-
-                # パターン2: メタタグ
-                if not title:
-                    meta_title = soup.find("meta", property="og:title")
-                    if meta_title:
-                        title_text = meta_title.get("content", "")
-                        # "｜note"や"｜著者名"などの部分を削除
-                        title = re.sub(r"[\s\|｜].*$", "", title_text)
-
-                # パターン3: titleタグ
-                if not title:
-                    title_elem = soup.title
-                    if title_elem:
-                        title_text = title_elem.text.strip()
-                        # "｜note"や"｜著者名"などの部分を削除
-                        title = re.sub(r"[\s\|｜].*$", "", title_text)
-
-                # パターン4: 任意のh1タグ
-                if not title:
-                    h1_elems = soup.find_all("h1")
-                    for h1 in h1_elems:
-                        if h1.text.strip():
-                            title = h1.text.strip()
-                            break
-
-                # 著者 (複数のパターンを試す)
-                author = "著者不明"
-
-                # パターン1: data-note-user-name属性
-                author_elem = soup.select_one("a[data-note-user-name]")
-                if author_elem:
-                    author = author_elem.get("data-note-user-name")
-
-                # パターン2: URLから著者名を抽出
-                if author == "著者不明":
-                    author_match = re.search(r"note\.com/([^/]+)", article["url"])
-                    if author_match:
-                        author = author_match.group(1)
-
-                # パターン3: メタタグから著者名を抽出
-                if author == "著者不明":
-                    meta_author = soup.find("meta", property="og:site_name")
-                    if meta_author:
-                        author_text = meta_author.get("content", "")
-                        if author_text and author_text != "note":
-                            author = author_text
-
-                # 投稿日
-                date_elem = soup.select_one("time")
-                published_date = date_elem.get("datetime") if date_elem else None
-
-                # いいね数
-                likes = "0"
-
-                # パターン1: data-like-count属性
-                like_elem = soup.select_one("button[data-like-count]")
-                if like_elem:
-                    likes = like_elem.get("data-like-count")
-
-                # パターン2: o-noteContentHeader__titleAttachment クラスの要素
-                if likes == "0":
-                    like_elem = soup.select_one(".o-noteContentHeader__titleAttachment")
-                    if like_elem:
-                        like_text = like_elem.text.strip()
-                        like_match = re.search(r"\d+", like_text)
-                        if like_match:
-                            likes = like_match.group(0)
-
-                # パターン3: likeやheartを含むクラス名の要素
-                if likes == "0":
-                    like_text_elem = soup.select_one(
-                        "span[class*='like'], div[class*='like'], span[class*='heart'], div[class*='heart']"
-                    )
-                    if like_text_elem:
-                        like_text = like_text_elem.text.strip()
-                        like_match = re.search(r"\d+", like_text)
-                        if like_match:
-                            likes = like_match.group(0)
-
-                # タグ
-                tags = []
-
-                # パターン1: /hashtag/へのリンク
-                tags_elems = soup.select("a[href^='/hashtag/']")
-                if tags_elems:
-                    tags = [tag.text.strip() for tag in tags_elems if tag.text.strip()]
-
-                # パターン2: tagを含むクラス名の要素
-                if not tags:
-                    tags_elems = soup.select("a[class*='tag'], span[class*='tag']")
-                    if tags_elems:
-                        tags = [tag.text.strip() for tag in tags_elems if tag.text.strip()]
-
-                # 本文の一部（最初の数段落）
-                content_preview = ""
-
-                # 複数のパターンを試す
-                content_elems = soup.select(
-                    "div.note-common-styles__textnote-body p, div[class*='styles__text'] p, article p"
-                )
-                if content_elems:
-                    content_preview = "\n".join([p.text.strip() for p in content_elems[:3] if p.text.strip()])
+                # 記事の各要素を取得
+                title = self._get_title(soup, article)
+                author = self._get_author(soup, article)
+                published_date = self._get_published_date(soup)
+                likes = self._get_likes(soup)
+                tags = self._get_tags(soup)
+                content_preview = self._get_content_preview(soup)
 
                 # 記事情報を更新
                 self.articles[i].update(
@@ -255,6 +153,172 @@ class NoteAICrawler:
                         "content_preview": f"エラーにより取得できませんでした: {str(e)}",
                     }
                 )
+
+    def _get_title(self, soup, article):
+        """記事のタイトルを取得する"""
+        title = article.get("title_from_search", "")
+
+        # 複数のパターンを試す
+        try:
+            # パターン1: o-noteContentHeader__title クラスのh1タグ
+            title_elem = soup.select_one("h1.o-noteContentHeader__title")
+            if title_elem and title_elem.text.strip():
+                return title_elem.text.strip()
+        except (AttributeError, TypeError):
+            pass
+
+        try:
+            # パターン2: メタタグ
+            meta_title = soup.find("meta", property="og:title")
+            if meta_title:
+                title_text = meta_title.get("content", "")
+                # "｜note"や"｜著者名"などの部分を削除
+                return re.sub(r"[\s\|｜].*$", "", title_text)
+        except (AttributeError, TypeError):
+            pass
+
+        try:
+            # パターン3: titleタグ
+            title_elem = soup.title
+            if title_elem:
+                title_text = title_elem.text.strip()
+                # "｜note"や"｜著者名"などの部分を削除
+                return re.sub(r"[\s\|｜].*$", "", title_text)
+        except (AttributeError, TypeError):
+            pass
+
+        try:
+            # パターン4: 任意のh1タグ
+            h1_elems = soup.find_all("h1")
+            for h1 in h1_elems:
+                if h1 and hasattr(h1, "text") and h1.text.strip():
+                    return h1.text.strip()
+        except (AttributeError, TypeError):
+            pass
+
+        try:
+            # パターン5: URLからスラッグを抽出して、タイトルとして使用
+            url_parts = article["url"].split("/")
+            if len(url_parts) > 0:
+                slug = url_parts[-1]
+                # スラッグをタイトルらしい形式に変換（ハイフンをスペースに置換など）
+                return slug.replace("-", " ").replace("_", " ").replace("n", "")
+        except Exception:
+            pass
+
+        return title or "タイトル不明"
+
+    def _get_author(self, soup, article):
+        """記事の著者を取得する"""
+        try:
+            # パターン1: data-note-user-name属性
+            author_elem = soup.select_one("a[data-note-user-name]")
+            if author_elem:
+                return author_elem.get("data-note-user-name")
+        except (AttributeError, TypeError):
+            pass
+
+        try:
+            # パターン2: URLから著者名を抽出
+            author_match = re.search(r"note\.com/([^/]+)", article["url"])
+            if author_match:
+                return author_match.group(1)
+        except Exception:
+            pass
+
+        try:
+            # パターン3: メタタグから著者名を抽出
+            meta_author = soup.find("meta", property="og:site_name")
+            if meta_author:
+                author_text = meta_author.get("content", "")
+                if author_text and author_text != "note":
+                    return author_text
+        except (AttributeError, TypeError):
+            pass
+
+        return "著者不明"
+
+    def _get_published_date(self, soup):
+        """記事の投稿日を取得する"""
+        try:
+            date_elem = soup.select_one("time")
+            if date_elem:
+                return date_elem.get("datetime")
+        except (AttributeError, TypeError):
+            pass
+        return None
+
+    def _get_likes(self, soup):
+        """記事のいいね数を取得する"""
+        try:
+            # パターン1: data-like-count属性
+            like_elem = soup.select_one("button[data-like-count]")
+            if like_elem:
+                return like_elem.get("data-like-count")
+        except (AttributeError, TypeError):
+            pass
+
+        try:
+            # パターン2: o-noteContentHeader__titleAttachment クラスの要素
+            like_elem = soup.select_one(".o-noteContentHeader__titleAttachment")
+            if like_elem:
+                like_text = like_elem.text.strip()
+                like_match = re.search(r"\d+", like_text)
+                if like_match:
+                    return like_match.group(0)
+        except (AttributeError, TypeError):
+            pass
+
+        try:
+            # パターン3: likeやheartを含むクラス名の要素
+            like_text_elem = soup.select_one(
+                "span[class*='like'], div[class*='like'], span[class*='heart'], div[class*='heart']"
+            )
+            if like_text_elem:
+                like_text = like_text_elem.text.strip()
+                like_match = re.search(r"\d+", like_text)
+                if like_match:
+                    return like_match.group(0)
+        except (AttributeError, TypeError):
+            pass
+
+        return "0"
+
+    def _get_tags(self, soup):
+        """記事のタグを取得する"""
+        tags = []
+
+        try:
+            # パターン1: /hashtag/へのリンク
+            tags_elems = soup.select("a[href^='/hashtag/']")
+            if tags_elems:
+                return [tag.text.strip() for tag in tags_elems if tag.text.strip()]
+        except (AttributeError, TypeError):
+            pass
+
+        try:
+            # パターン2: tagを含むクラス名の要素
+            tags_elems = soup.select("a[class*='tag'], span[class*='tag']")
+            if tags_elems:
+                return [tag.text.strip() for tag in tags_elems if tag.text.strip()]
+        except (AttributeError, TypeError):
+            pass
+
+        return tags
+
+    def _get_content_preview(self, soup):
+        """記事の本文プレビューを取得する"""
+        try:
+            # 複数のパターンを試す
+            content_elems = soup.select(
+                "div.note-common-styles__textnote-body p, div[class*='styles__text'] p, article p"
+            )
+            if content_elems:
+                return "\n".join([p.text.strip() for p in content_elems[:3] if p.text.strip()])
+        except (AttributeError, TypeError):
+            pass
+
+        return ""
 
     def filter_ai_articles(self):
         """AI関連の記事のみをフィルタリング"""
