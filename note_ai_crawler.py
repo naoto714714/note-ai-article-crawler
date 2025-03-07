@@ -72,6 +72,7 @@ class NoteAICrawler:
         detail_min_wait=2.0,
         detail_max_wait=4.0,
         only_yesterday=False,
+        days_to_look_back=3,
     ):
         """
         noteからAI関連の記事をクロールするクラス
@@ -85,6 +86,7 @@ class NoteAICrawler:
             detail_min_wait (float): 詳細取得時の最小待機時間（秒）
             detail_max_wait (float): 詳細取得時の最大待機時間（秒）
             only_yesterday (bool): 昨日の記事のみ取得するかどうか
+            days_to_look_back (int): 何日前までの記事を取得するか（only_yesterdayがFalseの場合に使用）
         """
         self.base_url = "https://note.com"
         self.search_url = f"{self.base_url}/search"
@@ -96,6 +98,7 @@ class NoteAICrawler:
         self.detail_min_wait = detail_min_wait
         self.detail_max_wait = detail_max_wait
         self.only_yesterday = only_yesterday
+        self.days_to_look_back = days_to_look_back
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
@@ -106,8 +109,9 @@ class NoteAICrawler:
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
-        # 昨日の日付を計算
+        # 日付の計算
         self.yesterday = (datetime.now() - timedelta(days=1)).date()
+        self.earliest_date = (datetime.now() - timedelta(days=self.days_to_look_back)).date()
 
     def search_articles(self):
         """検索ページから記事のリンクを取得"""
@@ -115,7 +119,7 @@ class NoteAICrawler:
 
         for page in tqdm(range(1, self.max_pages + 1), desc="ページ"):
             try:
-                params = {"q": self.search_keyword, "page": page}
+                params = {"q": self.search_keyword, "page": page, "context": "note", "sort": "new"}
 
                 response = requests.get(self.search_url, params=params, headers=self.headers)
                 response.raise_for_status()
@@ -409,11 +413,12 @@ class NoteAICrawler:
         self.articles = filtered_articles
 
     def filter_yesterday_articles(self):
-        """昨日の記事のみをフィルタリング"""
-        if not self.only_yesterday:
-            return
+        """昨日または指定期間内の記事のみをフィルタリング"""
+        filtered_articles = []
+        dates_found = set()
 
-        yesterday_articles = []
+        print("\n投稿日ごとの記事数:")
+        date_counts = {}
 
         for article in self.articles:
             published_date = article.get("published_date")
@@ -421,14 +426,40 @@ class NoteAICrawler:
                 try:
                     # ISO形式の日付文字列からdatetimeオブジェクトを作成
                     article_date = datetime.fromisoformat(published_date.replace("Z", "+00:00")).date()
-                    # 昨日の記事のみを抽出
-                    if article_date == self.yesterday:
-                        yesterday_articles.append(article)
+                    dates_found.add(article_date)
+
+                    # 日付ごとの記事数をカウント
+                    if article_date in date_counts:
+                        date_counts[article_date] += 1
+                    else:
+                        date_counts[article_date] = 1
+
+                    # 昨日の記事のみを抽出するモード
+                    if self.only_yesterday and article_date == self.yesterday:
+                        filtered_articles.append(article)
+                    # 指定期間内の記事を抽出するモード
+                    elif not self.only_yesterday and article_date >= self.earliest_date:
+                        filtered_articles.append(article)
                 except (ValueError, TypeError) as e:
                     print(f"日付解析エラー: {e}, 日付: {published_date}")
 
-        print(f"昨日の記事: {len(yesterday_articles)}/{len(self.articles)} 件")
-        self.articles = yesterday_articles
+        # 日付ごとの記事数を表示
+        for date in sorted(date_counts.keys(), reverse=True):
+            print(f"  {date}: {date_counts[date]}件")
+
+        if self.only_yesterday:
+            print(f"\n昨日({self.yesterday})の記事: {len(filtered_articles)}/{len(self.articles)} 件")
+        else:
+            print(f"\n{self.days_to_look_back}日以内の記事: {len(filtered_articles)}/{len(self.articles)} 件")
+
+        if not filtered_articles and dates_found:
+            print("\n警告: 指定期間内の記事が見つかりませんでした。")
+            print(f"見つかった記事の日付範囲: {min(dates_found)} 〜 {max(dates_found)}")
+            print(
+                "より多くの記事を取得するには、days_to_look_backの値を増やすか、only_yesterdayをFalseに設定してください。"
+            )
+
+        self.articles = filtered_articles
 
     def save_results(self):
         """結果をCSVとJSONで保存"""
@@ -458,11 +489,14 @@ class NoteAICrawler:
         self.search_articles()
         if self.articles:
             self.get_article_details()
-            if self.only_yesterday:
-                self.filter_yesterday_articles()
+            self.filter_yesterday_articles()
             self.filter_ai_articles()
-            self.save_results()
-            return True
+            if self.articles:
+                self.save_results()
+                return True
+            else:
+                print("フィルタリング後に記事が残りませんでした。")
+                return False
         return False
 
 
@@ -472,6 +506,7 @@ if __name__ == "__main__":
     max_pages = 5  # 検索する最大ページ数
     output_dir = "output"  # 出力ディレクトリ
     only_yesterday = False  # 昨日の記事のみ取得するかどうか
+    days_to_look_back = 3  # 何日前までの記事を取得するか（only_yesterdayがFalseの場合に使用）
 
     # クローラーの実行
     crawler = NoteAICrawler(
@@ -483,6 +518,7 @@ if __name__ == "__main__":
         detail_min_wait=2.0,
         detail_max_wait=4.0,
         only_yesterday=only_yesterday,
+        days_to_look_back=days_to_look_back,
     )
 
     crawler.run()
