@@ -1,0 +1,63 @@
+name: Daily Note AI Articles Crawler
+
+on:
+  schedule:
+    # 毎日午前3時（JST=UTC+9）に実行
+    - cron: '0 18 * * *'
+  # 手動実行用
+  workflow_dispatch:
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.9'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: Run crawler
+      run: |
+        # 昨日の記事のみを取得するように設定
+        python -c "
+import note_ai_crawler
+
+crawler = note_ai_crawler.NoteAICrawler(
+    search_keyword='AI',
+    max_pages=5,
+    output_dir='output',
+    min_wait=1.0,
+    max_wait=3.0,
+    detail_min_wait=2.0,
+    detail_max_wait=4.0,
+    only_yesterday=True,
+)
+
+crawler.run()
+"
+
+    - name: Set up Git
+      run: |
+        git config --local user.email "github-actions@github.com"
+        git config --local user.name "GitHub Actions"
+
+    - name: Commit and push changes
+      run: |
+        # 変更があるか確認
+        if [[ -n $(git status -s) ]]; then
+          git add -A
+          git commit -m "Add new AI articles $(date +'%Y-%m-%d')"
+          git push
+        else
+          echo "No changes to commit"
+        fi

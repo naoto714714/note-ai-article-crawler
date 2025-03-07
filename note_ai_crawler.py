@@ -6,7 +6,7 @@ import os
 import random
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import requests
@@ -71,6 +71,7 @@ class NoteAICrawler:
         max_wait=3.0,
         detail_min_wait=2.0,
         detail_max_wait=4.0,
+        only_yesterday=False,
     ):
         """
         noteからAI関連の記事をクロールするクラス
@@ -83,6 +84,7 @@ class NoteAICrawler:
             max_wait (float): 検索時の最大待機時間（秒）
             detail_min_wait (float): 詳細取得時の最小待機時間（秒）
             detail_max_wait (float): 詳細取得時の最大待機時間（秒）
+            only_yesterday (bool): 昨日の記事のみ取得するかどうか
         """
         self.base_url = "https://note.com"
         self.search_url = f"{self.base_url}/search"
@@ -93,6 +95,7 @@ class NoteAICrawler:
         self.max_wait = max_wait
         self.detail_min_wait = detail_min_wait
         self.detail_max_wait = detail_max_wait
+        self.only_yesterday = only_yesterday
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
@@ -102,6 +105,9 @@ class NoteAICrawler:
         # 出力ディレクトリの作成
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
+
+        # 昨日の日付を計算
+        self.yesterday = (datetime.now() - timedelta(days=1)).date()
 
     def search_articles(self):
         """検索ページから記事のリンクを取得"""
@@ -402,6 +408,28 @@ class NoteAICrawler:
         print(f"AI関連の記事は {len(filtered_articles)}/{len(self.articles)} 件でした。")
         self.articles = filtered_articles
 
+    def filter_yesterday_articles(self):
+        """昨日の記事のみをフィルタリング"""
+        if not self.only_yesterday:
+            return
+
+        yesterday_articles = []
+
+        for article in self.articles:
+            published_date = article.get("published_date")
+            if published_date:
+                try:
+                    # ISO形式の日付文字列からdatetimeオブジェクトを作成
+                    article_date = datetime.fromisoformat(published_date.replace("Z", "+00:00")).date()
+                    # 昨日の記事のみを抽出
+                    if article_date == self.yesterday:
+                        yesterday_articles.append(article)
+                except (ValueError, TypeError) as e:
+                    print(f"日付解析エラー: {e}, 日付: {published_date}")
+
+        print(f"昨日の記事: {len(yesterday_articles)}/{len(self.articles)} 件")
+        self.articles = yesterday_articles
+
     def save_results(self):
         """結果をCSVとJSONで保存"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -430,6 +458,8 @@ class NoteAICrawler:
         self.search_articles()
         if self.articles:
             self.get_article_details()
+            if self.only_yesterday:
+                self.filter_yesterday_articles()
             self.filter_ai_articles()
             self.save_results()
             return True
@@ -441,6 +471,7 @@ if __name__ == "__main__":
     search_keyword = "AI"  # 検索キーワード
     max_pages = 5  # 検索する最大ページ数
     output_dir = "output"  # 出力ディレクトリ
+    only_yesterday = False  # 昨日の記事のみ取得するかどうか
 
     # クローラーの実行
     crawler = NoteAICrawler(
@@ -451,6 +482,7 @@ if __name__ == "__main__":
         max_wait=3.0,
         detail_min_wait=2.0,
         detail_max_wait=4.0,
+        only_yesterday=only_yesterday,
     )
 
     crawler.run()
