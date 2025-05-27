@@ -1,12 +1,14 @@
 ---
 description: あなたがファイルの編集するときに参照しなければいけないファイルです。
-globs: 
+globs:
 alwaysApply: true
 ---
 # 基本的な知識
 - ファイルの末尾には、どんなファイルでも必ず改行を入れること
 - 不要なスペースが入っている場合は削除すること
 - Pythonのコーディングはpep8に従うこと
+- ファイルはローカルのファイルを確認すること
+- ローカルで編集・コミットしてから、リモートのGitHubへPushを行うように徹底することs
 
 # Git関連の知識
 - このプロジェクトのGitHubリポジトリは https://github.com/naoto714714/note-ai-article-crawler です。
